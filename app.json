@@ -1,10 +1,10 @@
 {
   "expo": {
-    "name": "expanxse-tracker",
-    "slug": "expanxse-tracker",
+    "name": "FinTrack",
+    "slug": "FinTrack",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/logo.png",
     "scheme": "expanxsetracker",
     "userInterfaceStyle": "automatic",
     "ios": {
@@ -17,7 +17,8 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.neeraj06.FinTrack"
     },
     "web": {
       "output": "static",
@@ -32,11 +33,22 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
         }
-      ]
+      ],
+      "expo-sqlite",
+      "expo-image",
+      "expo-sharing",
+      "expo-status-bar",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "eb321ec1-d650-4f33-b8ec-1cc7a9a69699"
+      }
     }
   }
 }
