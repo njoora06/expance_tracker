@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, Alert, TextInput, Platform, Modal } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, Platform, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
@@ -21,6 +21,8 @@ import { formatAmount, formatDate, formatTime } from '@/utils/helpers';
 import { exportCustomerLedger } from '@/utils/export';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { PickerModal } from '@/components/ui/PickerModal';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
+import { notify } from '@/utils/notify';
 
 export default function CustomerLedgerScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -28,6 +30,7 @@ export default function CustomerLedgerScreen() {
   const router = useRouter();
   const { currency } = useSettings();
   const { user } = useAuth();
+  const confirm = useConfirm();
 
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [transactions, setTransactions] = useState<CustomerTransaction[]>([]);
@@ -81,7 +84,7 @@ export default function CustomerLedgerScreen() {
   }, [loadData]);
 
   const handleSaveEdit = async () => {
-    if (!editName.trim()) { Alert.alert('Validation', 'Customer name is required'); return; }
+    if (!editName.trim()) { notify.error('Customer name is required', 'Enter a name to save your changes.'); return; }
     try {
       await updateCustomer(id!, {
         name: editName.trim(),
@@ -90,35 +93,41 @@ export default function CustomerLedgerScreen() {
         address: editAddress.trim(),
         notes: editNotes.trim(),
       }, userId);
-      Alert.alert('Updated', 'Customer updated successfully', [
-        { text: 'OK', onPress: () => { setIsEditing(false); loadData(); } },
-      ]);
+      setIsEditing(false);
+      loadData();
+      notify.success('Customer updated', 'Your changes have been saved.');
     } catch (e) {
-      Alert.alert('Error', 'Failed to update customer');
+      notify.error("Couldn't update customer");
     }
   };
 
-  const handleDelete = () => {
-    Alert.alert('Delete Customer', `Delete "${customer?.name}" and all their transactions?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete', style: 'destructive',
-        onPress: async () => {
-          await deleteCustomer(id!, userId);
-          router.back();
-        },
-      },
-    ]);
+  const handleDelete = async () => {
+    const ok = await confirm({
+      title: 'Delete customer?',
+      message: `"${customer?.name}" and all their transactions will be permanently deleted.`,
+      confirmText: 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
+    try {
+      await deleteCustomer(id!, userId);
+      router.back();
+      notify.success('Customer deleted', `${customer?.name} has been removed.`);
+    } catch (e) {
+      notify.error("Couldn't delete customer");
+    }
   };
 
   const handleExport = async () => {
     if (!customer) return;
-    const success = await exportCustomerLedger(customer, transactions, currency);
-    if (success) {
-      Alert.alert('Exported', 'Ledger exported successfully');
-    } else {
-      Alert.alert('Error', 'Failed to export');
-    }
+    const exporting = exportCustomerLedger(customer, transactions, currency).then((success) => {
+      if (!success) throw new Error('Export failed');
+    });
+    notify.promise(exporting, {
+      loading: 'Exporting ledger…',
+      success: 'Ledger exported',
+      error: "Couldn't export ledger",
+    }).catch(() => {});
   };
 
   const handleEditTxnPress = (txn: CustomerTransaction) => {
@@ -156,27 +165,27 @@ export default function CustomerLedgerScreen() {
       );
       setEditingTxn(null);
       loadData();
+      notify.success('Transaction updated', `${formatAmount(Number(txnAmount), currency)} ${txnType}`);
     } catch {
-      Alert.alert('Error', 'Failed to update transaction');
+      notify.error("Couldn't update transaction");
     }
   };
 
-  const handleDeleteTxnPress = (txn: CustomerTransaction) => {
-    Alert.alert('Delete Transaction', `Delete this ${txn.type} of ${formatAmount(txn.amount, currency)}?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await deleteTransaction(txn.id, txn.customerId, userId);
-            loadData();
-          } catch {
-            Alert.alert('Error', 'Failed to delete transaction');
-          }
-        },
-      },
-    ]);
+  const handleDeleteTxnPress = async (txn: CustomerTransaction) => {
+    const ok = await confirm({
+      title: 'Delete transaction?',
+      message: `This ${txn.type} of ${formatAmount(txn.amount, currency)} will be permanently deleted and the balance recalculated.`,
+      confirmText: 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
+    try {
+      await deleteTransaction(txn.id, txn.customerId, userId);
+      loadData();
+      notify.success('Transaction deleted', `${formatAmount(txn.amount, currency)} ${txn.type} removed.`);
+    } catch {
+      notify.error("Couldn't delete transaction");
+    }
   };
 
   if (!customer) {

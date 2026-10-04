@@ -422,17 +422,19 @@ export async function getAllCustomersReport(
   totalCredit: number;
   totalDebit: number;
   closingBalance: number;
+  transactions: CustomerTransaction[];
 }[]> {
   const customers = await getCustomers(userId);
   const reports = [];
   for (const c of customers) {
-    const { totalCredit, totalDebit, closingBalance } = await getCustomerReport(c.id, start, end, userId);
+    const { totalCredit, totalDebit, closingBalance, transactions } = await getCustomerReport(c.id, start, end, userId);
     reports.push({
       customerId: c.id,
       customerName: c.name,
       totalCredit,
       totalDebit,
       closingBalance,
+      transactions,
     });
   }
   return reports;
@@ -512,7 +514,16 @@ export async function backupData(userId: string): Promise<string> {
   for (const c of customers) {
     allTxns[c.id] = await getTransactions(c.id, userId);
   }
-  return JSON.stringify({ customers, transactions: allTxns });
+  const transactionCount = Object.values(allTxns).reduce((n, list) => n + list.length, 0);
+  // `customers` and `transactions` are what restoreData() reads; the rest is descriptive metadata.
+  return JSON.stringify({
+    app: 'FinTrack',
+    version: 1,
+    createdAt: new Date().toISOString(),
+    counts: { customers: customers.length, transactions: transactionCount },
+    customers,
+    transactions: allTxns,
+  });
 }
 
 export async function restoreData(data: string, userId: string): Promise<string | null> {

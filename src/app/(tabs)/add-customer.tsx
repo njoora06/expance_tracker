@@ -1,10 +1,11 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '@/hooks/use-theme';
 import { useAuth } from '@/hooks/use-auth';
 import { addCustomer } from '@/store/storage';
+import { notify } from '@/utils/notify';
 
 export default function AddCustomerScreen() {
   const theme = useTheme();
@@ -38,16 +39,15 @@ export default function AddCustomerScreen() {
         openingBalance: 0,
         notes: notes.trim(),
       }, user!.id);
-      Alert.alert('Success', 'Customer added successfully', [
-        { text: 'OK', onPress: () => router.back() },
-      ]);
+      notify.success('Customer added', `${name.trim()} has been added to your customers.`);
       setName('');
       setMobile('');
       setEmail('');
       setAddress('');
       setNotes('');
+      router.back();
     } catch (e) {
-      Alert.alert('Error', 'Failed to save customer');
+      notify.error("Couldn't save customer");
     } finally {
       setSaving(false);
     }

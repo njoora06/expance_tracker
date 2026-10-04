@@ -50,6 +50,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(result.user);
       return null;
     } catch (e) {
+      console.error('[Auth] Login failed:', e);
       return e instanceof Error ? e.message : 'Something went wrong. Please try again.';
     }
   }, []);
@@ -65,6 +66,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(result.user);
       return null;
     } catch (e) {
+      console.error('[Auth] Register failed:', e);
       return e instanceof Error ? e.message : 'Something went wrong. Please try again.';
     }
   }, []);

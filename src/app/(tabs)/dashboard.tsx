@@ -21,6 +21,8 @@ import {
 import { formatAmount, formatDate } from '@/utils/helpers';
 import { Customer } from '@/store/types';
 
+const RECENT_CUSTOMERS_COUNT = 3;
+
 const COLORS = {
   customers: '#208AEF',
   receivable: '#4ECDC4',
@@ -63,7 +65,8 @@ export default function DashboardScreen() {
     setTotals(balances);
     setTodayCount(todayTxns.reduce((s, t) => s + t.transaction.amount, 0));
 
-    const recent = customers.slice(-5).reverse();
+    // getCustomers() returns newest first.
+    const recent = customers.slice(0, RECENT_CUSTOMERS_COUNT);
     const balancesArr = await Promise.all(
       recent.map((c) => getCustomerBalance(c.id, userId))
     );
