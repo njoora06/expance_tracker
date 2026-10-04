@@ -1,14 +1,18 @@
 import * as ImagePicker from 'expo-image-picker';
 import { PickerModal } from '@/components/ui/PickerModal';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
+import { BackupSheet } from '@/components/ui/BackupSheet';
 import { useAuth } from '@/hooks/use-auth';
 import { useSettings } from '@/hooks/use-settings';
 import { useTheme } from '@/hooks/use-theme';
-import { backupData, clearAllData } from '@/store/storage';
+import { clearAllData, restoreData } from '@/store/storage';
 import { CURRENCIES, CurrencyCode, ThemeMode } from '@/store/types';
+import { notify } from '@/utils/notify';
+import { BackupInfo, createBackupFile, getLastBackupDate, pickBackupFile } from '@/utils/backup';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, useColorScheme, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, useColorScheme, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function SettingsScreen() {
@@ -18,11 +22,20 @@ export default function SettingsScreen() {
   const { theme: themeMode, currency, setTheme, setCurrency } = useSettings();
   const { user, logout, updateProfile } = useAuth();
   const [showCurrencyPicker, setShowCurrencyPicker] = useState(false);
+  const confirm = useConfirm();
+  const [backupResult, setBackupResult] = useState<BackupInfo | null>(null);
+  const [lastBackup, setLastBackup] = useState<Date | null>(() => {
+    try {
+      return getLastBackupDate();
+    } catch {
+      return null;
+    }
+  });
 
   const handleChangePhoto = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
-      Alert.alert('Permission needed', 'Allow access to your photo library to update your profile photo');
+      notify.error('Permission needed', 'Allow photo library access to update your profile photo.');
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -32,19 +45,29 @@ export default function SettingsScreen() {
       quality: 0.8,
     });
     if (!result.canceled && result.assets[0]) {
-      await updateProfile(result.assets[0].uri);
+      try {
+        await updateProfile(result.assets[0].uri);
+        notify.success('Profile photo updated');
+      } catch (e) {
+        notify.error("Couldn't update photo");
+      }
     }
   };
 
-  const handleRemovePhoto = () => {
-    Alert.alert('Remove Photo', 'Are you sure you want to remove your profile photo?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Remove',
-        style: 'destructive',
-        onPress: () => updateProfile(''),
-      },
-    ]);
+  const handleRemovePhoto = async () => {
+    const ok = await confirm({
+      title: 'Remove profile photo?',
+      message: 'Your profile will show your initials instead.',
+      confirmText: 'Remove',
+      destructive: true,
+    });
+    if (!ok) return;
+    try {
+      await updateProfile('');
+      notify.success('Profile photo removed');
+    } catch (e) {
+      notify.error("Couldn't remove photo");
+    }
   };
 
   const getThemeLabel = useCallback(() => {
@@ -58,38 +81,77 @@ export default function SettingsScreen() {
   const handleBackup = async () => {
     if (!user) return;
     try {
-      const data = await backupData(user.id);
-      Alert.alert('Backup', 'Backup created successfully.');
+      const info = await notify.promise(createBackupFile(user.id), {
+        loading: 'Creating backup…',
+        success: 'Backup created',
+        error: "Couldn't create backup",
+      });
+      setLastBackup(new Date(info.createdAt));
+      setBackupResult(info);
     } catch (e) {
-      Alert.alert('Error', 'Failed to create backup');
+      // Error toast already shown by notify.promise.
+      console.error('[Backup] Create failed:', e);
     }
   };
 
-  const handleClearData = () => {
+  const handleRestore = async () => {
     if (!user) return;
-    Alert.alert('Clear All Data', 'This will permanently delete all customers and transactions. Are you sure?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Clear', style: 'destructive',
-        onPress: async () => {
-          await clearAllData(user.id);
-          Alert.alert('Done', 'All data cleared');
-        },
-      },
-    ]);
+    let preview;
+    try {
+      preview = await pickBackupFile();
+    } catch (e) {
+      notify.error(
+        e instanceof Error && e.message === 'Not a FinTrack backup file' ? e.message : "Couldn't read backup file",
+        'Choose a .json file created with FinTrack Backup.'
+      );
+      return;
+    }
+    if (!preview) return;
+
+    const { customers, transactions } = preview.counts;
+    const from = preview.createdAt ? ` from ${new Date(preview.createdAt).toLocaleDateString()}` : '';
+    const ok = await confirm({
+      title: 'Restore backup?',
+      message: `Import ${customers} customers and ${transactions} transactions${from}. Existing records with the same ID will be overwritten.`,
+      confirmText: 'Restore',
+    });
+    if (!ok) return;
+
+    const error = await restoreData(preview.text, user.id);
+    if (error) {
+      notify.error("Couldn't restore backup", error);
+    } else {
+      notify.success('Backup restored', `${customers} customers · ${transactions} transactions`);
+    }
   };
 
-  const handleLogout = () => {
-    Alert.alert('Logout', 'Are you sure you want to logout?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Logout', style: 'destructive',
-        onPress: async () => {
-          await logout();
-          router.replace('/(auth)/login');
-        },
-      },
-    ]);
+  const handleClearData = async () => {
+    if (!user) return;
+    const ok = await confirm({
+      title: 'Clear all data?',
+      message: 'All customers and transactions will be permanently deleted. This cannot be undone.',
+      confirmText: 'Clear data',
+      destructive: true,
+    });
+    if (!ok) return;
+    try {
+      await clearAllData(user.id);
+      notify.success('All data cleared');
+    } catch (e) {
+      notify.error("Couldn't clear data");
+    }
+  };
+
+  const handleLogout = async () => {
+    const ok = await confirm({
+      title: 'Log out?',
+      message: 'You will need to sign in again to access your ledger.',
+      confirmText: 'Log out',
+      destructive: true,
+    });
+    if (!ok) return;
+    await logout();
+    router.replace('/(auth)/login');
   };
 
   const getGreeting = useCallback(() => {
@@ -199,10 +261,31 @@ export default function SettingsScreen() {
           <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>Data Management</Text>
           <View style={[styles.card, { backgroundColor: theme.backgroundElement }]}>
             <Pressable style={styles.settingRow} onPress={handleBackup}>
-              <Text style={[styles.settingLabel, { color: theme.text }]}>Backup</Text>
+              <View>
+                <Text style={[styles.settingLabel, { color: theme.text }]}>Create Backup</Text>
+                <Text style={[styles.settingHint, { color: theme.textSecondary }]}>
+                  {lastBackup
+                    ? `Last backup: ${lastBackup.toLocaleDateString()} ${lastBackup.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                    : 'Save your customers and transactions to a file'}
+                </Text>
+              </View>
               <Text style={[styles.settingArrow, { color: theme.textSecondary }]}>›</Text>
             </Pressable>
             <View style={[styles.divider, { backgroundColor: theme.background }]} />
+            {Platform.OS !== 'web' && (
+              <>
+                <Pressable style={styles.settingRow} onPress={handleRestore}>
+                  <View>
+                    <Text style={[styles.settingLabel, { color: theme.text }]}>Restore from Backup</Text>
+                    <Text style={[styles.settingHint, { color: theme.textSecondary }]}>
+                      Import a FinTrack backup file
+                    </Text>
+                  </View>
+                  <Text style={[styles.settingArrow, { color: theme.textSecondary }]}>›</Text>
+                </Pressable>
+                <View style={[styles.divider, { backgroundColor: theme.background }]} />
+              </>
+            )}
             <Pressable style={styles.settingRow} onPress={handleClearData}>
               <Text style={[styles.settingLabel, { color: '#FF6B6B' }]}>Clear All Data</Text>
             </Pressable>
@@ -253,6 +336,10 @@ export default function SettingsScreen() {
         onSelect={(v) => setCurrency(v as CurrencyCode)}
         onClose={() => setShowCurrencyPicker(false)}
       />
+
+      {backupResult && (
+        <BackupSheet key={backupResult.name} backup={backupResult} onClose={() => setBackupResult(null)} />
+      )}
     </SafeAreaView>
   );
 }

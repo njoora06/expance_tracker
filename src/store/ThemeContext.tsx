@@ -4,7 +4,7 @@ import { getSettings, updateSettings } from '@/store/storage';
 import { Colors } from '@/constants/theme';
 import { CurrencyCode, ThemeMode, Settings } from '@/store/types';
 
-type ThemeColors = { text: string; background: string; backgroundElement: string; backgroundSelected: string; textSecondary: string };
+type ThemeColors = { text: string; background: string; backgroundElement: string; backgroundSelected: string; textSecondary: string; primary: string; success: string; danger: string };
 
 interface ThemeContextValue {
   theme: ThemeMode;

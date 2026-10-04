@@ -1,4 +1,6 @@
+import { Platform } from 'react-native';
 import * as Crypto from 'expo-crypto';
+import * as LocalAuthentication from 'expo-local-authentication';
 import { getDb, generateId } from './database';
 
 function hashPassword(password: string): Promise<string> {
@@ -230,4 +232,84 @@ export async function changePassword(
     'UPDATE users SET passwordHash = ? WHERE _id = ?',
     [newHash, userId]
   );
+}
+
+// --- Forgot password (offline, verified with the phone's own screen lock) ---
+
+const RESET_GRANT_TTL_MS = 10 * 60 * 1000;
+
+// Issued only by verifyWithDeviceLock(); resetPassword() refuses to run without it.
+// Kept in memory on purpose: it never survives an app restart.
+let resetGrant: { token: string; userId: string; expiresAt: number } | null = null;
+
+export async function findUserForReset(email: string): Promise<{ userId: string; fullName: string }> {
+  const db = await getDb();
+  const rows = await db.getAllAsync(
+    'SELECT _id, fullName FROM users WHERE email = ?',
+    email.toLowerCase().trim()
+  );
+  if (rows.length === 0) {
+    throw new Error('No account with this email on this device');
+  }
+  const u = rows[0] as any;
+  return { userId: u._id, fullName: u.fullName };
+}
+
+export type DeviceLockStatus = 'available' | 'no_lock' | 'unsupported';
+
+export async function getDeviceLockStatus(): Promise<DeviceLockStatus> {
+  if (Platform.OS === 'web') return 'unsupported';
+  const level = await LocalAuthentication.getEnrolledLevelAsync();
+  return level === LocalAuthentication.SecurityLevel.NONE ? 'no_lock' : 'available';
+}
+
+export type DeviceLockResult =
+  | { ok: true; token: string }
+  | { ok: false; reason: 'cancelled' | 'no_lock' | 'failed'; message?: string };
+
+export async function verifyWithDeviceLock(userId: string): Promise<DeviceLockResult> {
+  const result = await LocalAuthentication.authenticateAsync({
+    promptMessage: "Verify it's you to reset your password",
+    cancelLabel: 'Cancel',
+    disableDeviceFallback: false,
+  });
+
+  if (result.success) {
+    const token = Crypto.randomUUID();
+    resetGrant = { token, userId, expiresAt: Date.now() + RESET_GRANT_TTL_MS };
+    return { ok: true, token };
+  }
+
+  switch (result.error) {
+    case 'user_cancel':
+    case 'system_cancel':
+    case 'app_cancel':
+      return { ok: false, reason: 'cancelled' };
+    case 'not_enrolled':
+    case 'passcode_not_set':
+      return { ok: false, reason: 'no_lock' };
+    case 'lockout':
+      return { ok: false, reason: 'failed', message: 'Too many attempts. Unlock your phone, then try again.' };
+    default:
+      return { ok: false, reason: 'failed', message: 'Verification failed. Try again.' };
+  }
+}
+
+export function cancelPasswordReset(): void {
+  resetGrant = null;
+}
+
+export async function resetPassword(token: string, newPassword: string): Promise<void> {
+  const grant = resetGrant;
+  if (!grant || grant.token !== token || Date.now() > grant.expiresAt) {
+    resetGrant = null;
+    throw new Error('Verification expired, please verify again');
+  }
+
+  const db = await getDb();
+  const passwordHash = await hashPassword(newPassword);
+  await db.runAsync('UPDATE users SET passwordHash = ? WHERE _id = ?', [passwordHash, grant.userId]);
+  // Sign out any saved session for this user so the new password is required.
+  await db.runAsync('DELETE FROM sessions WHERE userId = ?', grant.userId);
+  resetGrant = null;
 }

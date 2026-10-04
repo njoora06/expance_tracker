@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, Alert, Platform } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
@@ -10,6 +10,7 @@ import { addTransaction } from '@/store/storage';
 import { PAYMENT_METHODS, PaymentMethod, TransactionType } from '@/store/types';
 import { formatAmount } from '@/utils/helpers';
 import { useSettings } from '@/hooks/use-settings';
+import { notify } from '@/utils/notify';
 
 export default function AddTransactionScreen() {
   const { customerId, customerName } = useLocalSearchParams<{ customerId: string; customerName: string }>();
@@ -51,11 +52,13 @@ export default function AddTransactionScreen() {
         paymentMethod,
         notes: notes.trim(),
       }, user!.id);
-      Alert.alert('Success', 'Transaction added successfully', [
-        { text: 'OK', onPress: () => router.back() },
-      ]);
+      notify.success(
+        'Transaction added',
+        `${type === 'credit' ? '+' : '-'}${formatAmount(Number(amount), currency)} ${type}${customerName ? ` for ${customerName}` : ''}`
+      );
+      router.back();
     } catch (e) {
-      Alert.alert('Error', 'Failed to save transaction');
+      notify.error("Couldn't save transaction");
     } finally {
       setSaving(false);
     }

@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, Alert, Platform } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
@@ -18,6 +18,7 @@ import {
 } from '@/store/storage';
 import { formatAmount, formatDate } from '@/utils/helpers';
 import { exportCustomerReport } from '@/utils/export';
+import { notify } from '@/utils/notify';
 import { Customer } from '@/store/types';
 import { Spacing } from '@/constants/theme';
 
@@ -123,39 +124,52 @@ export default function ReportsScreen() {
     }, [loadData])
   );
 
+  const showExportResult = (exporting: Promise<boolean>) => {
+    notify.promise(
+      exporting.then((success) => {
+        if (!success) throw new Error('Export failed');
+      }),
+      { loading: 'Exporting report…', success: 'Report exported', error: "Couldn't export report" }
+    ).catch(() => {});
+  };
+
   const handleExport = async () => {
     if (!userId) return;
     const range = getDateRange();
     const customer = customers.find((c) => c.id === selectedCustomerId);
+    const periodLabel = `${PERIOD_LABELS[period]}: ${formatDate(range.start.toISOString())} – ${formatDate(range.end.toISOString())}`;
     if (selectedCustomerId && customer) {
       const report = await getCustomerReport(selectedCustomerId, range.start, range.end, userId);
-      const success = await exportCustomerReport(
-        report,
-        customer.name,
-        `${period}_${customer.name}`,
+      showExportResult(exportCustomerReport({
+        scope: customer.name,
+        period: periodLabel,
+        filename: `${period}_${customer.name}`,
         currency,
-      );
-      if (success) Alert.alert('Exported', 'Report exported successfully');
-      else Alert.alert('Error', 'Failed to export');
+        rows: report.transactions.map((txn) => ({ customerName: customer.name, txn })),
+        openingBalance: report.closingBalance - report.totalCredit + report.totalDebit,
+        closingBalance: report.closingBalance,
+      }));
     } else {
       const reports = await getAllCustomersReport(range.start, range.end, userId);
-      if (reports.length === 0) {
-        Alert.alert('No Data', 'No data to export');
+      const rows = reports.flatMap((r) => r.transactions.map((txn) => ({ customerName: r.customerName, txn })));
+      if (rows.length === 0) {
+        notify.info('Nothing to export', 'There are no transactions in the selected period.');
         return;
       }
-      const success = await exportCustomerReport(
-        {
-          totalCredit: reports.reduce((s, r) => s + r.totalCredit, 0),
-          totalDebit: reports.reduce((s, r) => s + r.totalDebit, 0),
-          closingBalance: reports.reduce((s, r) => s + r.closingBalance, 0),
-          transactions: [],
-        },
-        'All_Customers',
-        `${period}_all_customers`,
+      const closingBalance = reports.reduce((s, r) => s + r.closingBalance, 0);
+      const totalCredit = reports.reduce((s, r) => s + r.totalCredit, 0);
+      const totalDebit = reports.reduce((s, r) => s + r.totalDebit, 0);
+      rows.sort((a, b) => new Date(b.txn.date).getTime() - new Date(a.txn.date).getTime());
+      showExportResult(exportCustomerReport({
+        scope: 'All customers',
+        period: periodLabel,
+        filename: `${period}_all_customers`,
         currency,
-      );
-      if (success) Alert.alert('Exported', 'Report exported successfully');
-      else Alert.alert('Error', 'Failed to export');
+        rows,
+        openingBalance: closingBalance - totalCredit + totalDebit,
+        closingBalance,
+        customers: reports.map((r) => ({ id: r.customerId, name: r.customerName, closingBalance: r.closingBalance })),
+      }));
     }
   };
 

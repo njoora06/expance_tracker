@@ -1,4 +1,5 @@
 import { useTheme } from '@/hooks/use-theme';
+import { notify } from '@/utils/notify';
 import { useAuth } from '@/store/AuthContext';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
@@ -6,7 +7,6 @@ import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -70,7 +70,7 @@ export default function SignUpScreen() {
   const handlePickPhoto = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
-      Alert.alert('Permission needed', 'Allow access to your photo library to set a profile photo');
+      notify.error('Permission needed', 'Allow photo library access to set a profile photo.');
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
